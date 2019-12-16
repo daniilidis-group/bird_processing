@@ -92,6 +92,7 @@ class SingleVideoIterator(object):
         data = None
         while self.frame_cnt < self.common_frames[0]:
             data = self.dali_iterator.next()
+            data[0]['data'] = data[0]['data'] / 255.0
             # print('iter ', self.idx, ' getting frame: ', self.frame_cnt)
             self.frame_cnt += 1
         # remove first frame
