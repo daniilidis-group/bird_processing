@@ -35,7 +35,7 @@ def show_synchronized_frames(inputs):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='tests the projector.')
+        description='tests the video loading.')
     parser.add_argument('--root_dir', '-r', action='store', required=True,
                         help='directory where video files live.')
 
