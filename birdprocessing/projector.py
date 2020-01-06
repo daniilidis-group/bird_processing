@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import copy
 import numpy as np
 import cv2
 import yaml
@@ -40,6 +39,21 @@ class Projector:
             proj, _ = cv2.projectPoints(p3d, c.rvec, c.tvec, c.K, c.dist)
             img_pts[i, :, :] = proj[:, 0, :]
         return img_pts
+
+    def project_with_depth(self, p3d):
+        img_pts = np.zeros((len(self.cameras), p3d.shape[0], 3))
+        for i, c in enumerate(self.cameras):
+            proj, _ = cv2.projectPoints(p3d, c.rvec, c.tvec, c.K, c.dist)
+            img_pts[i, :, 0:2] = proj[:, 0, :]
+            R, _ = cv2.Rodrigues(c.rvec)
+            img_pts[i, :, 2] = (np.matmul(p3d, R.T) + c.tvec)[:, 2]
+        return img_pts
+
+    def get_K_matrices(self):
+        return [c.K for c in self.cameras]
+
+    def get_num_cameras(self):
+        return len(self.cameras)
 
 
 def read_yaml(filename):
