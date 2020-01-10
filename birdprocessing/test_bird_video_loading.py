@@ -27,7 +27,7 @@ def show_synchronized_frames(inputs):
             img_seq = inputs[cam_idx]['data']
             # the first two indexes are batch and sequence number
             # which are always of size 1
-            npimg = img_seq[0, 0, :, :, :].cpu().numpy().squeeze()
+            npimg = img_seq[:, :, :].cpu().numpy().squeeze()
             npimg = npimg / 255.0  # normalize to 0...1
             plt.imshow(np.transpose(npimg, (1, 2, 0)), vmin=0, vmax=1.0)
         plt.show()
@@ -38,22 +38,16 @@ if __name__ == '__main__':
         description='tests the video loading.')
     parser.add_argument('--root_dir', '-r', action='store', required=True,
                         help='directory where video files live.')
+    parser.add_argument('--sequence_length', '-s', action='store', required=False,
+                        default=12, help='decoding sequence length.')
 
     args = parser.parse_args()
 
-    # Size of crop. This feature is not supported yet, must be set to
-    # the full image size
-    crop_size = [1200, 1920]
 
     # Instantiate synchronized video loader
-    # 
-    loader = SynchronizedVideoLoader(args.root_dir, crop_size)
+    loader = SynchronizedVideoLoader(args.root_dir, sequence_length=args.sequence_length)
 
     for i, inputs in enumerate(loader):
         frame_0 = inputs[0]
         print(i, 'size: ', frame_0['data'].shape, frame_0['time'])
         show_synchronized_frames(inputs)
-
-
-
-
