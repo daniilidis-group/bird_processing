@@ -217,9 +217,6 @@ class SynchronizedVideoLoader():
         self.sync_iterator = SynchronizedVideoIterator(iterators, valid_ts)
         self.epoch_size = len(valid_ts)
         print('synchronized video number of frames: ', self.epoch_size)
-        with open('ts.txt', 'w') as f:
-            for t in valid_ts:
-                f.write(t + '\n')
 
     def find_common_time_stamps(self, views):
         cnt = defaultdict(int)
