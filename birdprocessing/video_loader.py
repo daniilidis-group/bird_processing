@@ -8,6 +8,7 @@ from collections import defaultdict
 from colorama import Fore, Style
 
 import numpy as np
+import torch
 import nvidia.dali.ops as ops
 import nvidia.dali.types as types
 
@@ -20,8 +21,7 @@ class VideoReaderPipeline(Pipeline):
         self.reader = ops.VideoReader(
             device="gpu", filenames=files,
             sequence_length=sequence_length, normalized=False,
-            random_shuffle=False, image_type=types.RGB,
-            dtype=types.UINT8, initial_fill=2*sequence_length)
+            image_type=types.RGB, dtype=types.UINT8)
         self.transpose = ops.Transpose(device="gpu", perm=[0, 3, 1, 2])
 
     def define_graph(self):
@@ -33,6 +33,7 @@ class View():
     def __init__(self, idx, video_file_name, ts_file_name, batch_size,
                  sequence_length):
         self.idx = idx
+        self.video_file_name = video_file_name
         self.init_time_stamps(ts_file_name, video_file_name)
         self.pipeline = VideoReaderPipeline(
             batch_size=batch_size, sequence_length=sequence_length,
@@ -40,6 +41,13 @@ class View():
             files=(video_file_name))
         self.pipeline.build()
         self.epoch_size = self.pipeline.epoch_size("Reader")
+        drop_tail = len(self.ts) - self.epoch_size * sequence_length
+        # eliminate time stamps that will be dropped due to the DALI
+        # layer deliviring only complete sequences
+        full_length = len(self.ts)
+        self.ts = self.ts[:-drop_tail]
+        print('video %s has %7d frames, trimmed to %7d' % (
+            self.video_file_name, full_length, len(self.ts)))
         self.dali_iterator = pytorch.DALIGenericIterator(
             self.pipeline, ["data"], self.epoch_size, auto_reset=True)
 
@@ -48,11 +56,10 @@ class View():
 
     def init_time_stamps(self, ts_fname, v_fname):
         # make dummy pipeline to find out what the
-        # number of frames is....
+        # exact number of frames is....
         tmp_pipeline = VideoReaderPipeline(
             batch_size=1, sequence_length=1,
-            num_threads=1, device_id=0,
-            files=(v_fname))
+            num_threads=1, device_id=0, files=(v_fname))
         tmp_pipeline.build()
         self.number_of_frames = tmp_pipeline.epoch_size("Reader")
         del tmp_pipeline  # hopefully this frees up memory
@@ -82,11 +89,48 @@ class View():
         return self.dali_iterator.__iter__()
 
 
-class SingleVideoIterator(object):
-    def __init__(self, idx, dali_iterator, seq_len, common_frames):
-        self.idx = idx
+class BufferedIterator(object):
+    def __init__(self, video_id, dali_iterator, seq_len):
+        self.video_id = video_id
         self.dali_iterator = dali_iterator
+        self.data = None
+        self.idx  = 0
         self.seq_len = seq_len
+
+    def __next__(self):
+        # check if previous sequence has
+        # been completely used up
+        if self.idx == self.seq_len:
+            self.idx = 0
+            self.data = None
+        # fetch new sequence if necessary
+        if self.data is None:
+            try:
+                self.data = self.dali_iterator.next()
+            except (StopIteration):
+                raise StopIteration
+                
+        if self.data is None:
+            raise StopIteration
+        d = torch.squeeze(torch.narrow(self.data[0]['data'], 1, self.idx, 1), dim=0)
+        self.idx += 1
+        return {'data': d}
+
+    def next(self):
+        return self.__next__()
+
+    def reset(self):
+        self.dali_iterator.reset()
+        self.data = None
+        self.idx = 0
+
+    def __iter__(self):
+        return self
+
+class SingleVideoIterator(object):
+    def __init__(self, video_id, dali_iterator, seq_len, common_frames):
+        self.video_id = video_id
+        self.buffered_iterator = BufferedIterator(video_id, dali_iterator, seq_len)
         # common_frames holds the local iterators frame numbers
         # that are valid across all cameras.
         self.common_frames = common_frames
@@ -94,21 +138,17 @@ class SingleVideoIterator(object):
         # frame numbers as counted via the dali iterator
         self.frame_cnt = -1
         # 
-        self.seq_head = -1
-        self.seq  = None
-
     def __next__(self):
         if len(self.common_frames) == 0:
             raise StopIteration
         # skip all frames that are not common
         data = None
         while self.frame_cnt < self.common_frames[0]:
-            data = self.dali_iterator.next()
-            data[0]['data'] = data[0]['data'] / 255.0
+            data = self.buffered_iterator.next()
             self.frame_cnt += 1
         # remove first frame
         self.common_frames.pop(0)
-        # print('iter ', self.idx, ' delivers frame: ', self.frame_cnt - 1)
+#        print('single video iter ', self.video_id, ' delivers frame: ', self.frame_cnt - 1)
         return data
 
     def next(self):
@@ -134,7 +174,7 @@ class SynchronizedVideoIterator(object):
         frames = []
         stamp = self.ts[self.frame_cnt]
         for i, it in enumerate(self.iterators):
-            iv = it.next()[0]
+            iv = it.next()
             iv['time'] = stamp
             iv['frame'] = self.frame_cnt
             frames.append(iv)
@@ -168,7 +208,6 @@ class SynchronizedVideoLoader():
         for idx, f in enumerate(all_files):
             view = View(idx, f[0], f[1], batch_size=1,
                         sequence_length=sequence_length)
-            print('video %s has %7d frames' % (f[0], view.epoch_size))
             self.views.append(view)
         valid_ts = self.find_common_time_stamps(self.views)
         iterators = [
@@ -178,6 +217,9 @@ class SynchronizedVideoLoader():
         self.sync_iterator = SynchronizedVideoIterator(iterators, valid_ts)
         self.epoch_size = len(valid_ts)
         print('synchronized video number of frames: ', self.epoch_size)
+        with open('ts.txt', 'w') as f:
+            for t in valid_ts:
+                f.write(t + '\n')
 
     def find_common_time_stamps(self, views):
         cnt = defaultdict(int)
@@ -192,4 +234,5 @@ class SynchronizedVideoLoader():
         return int(self.epoch_size)
 
     def __iter__(self):
+        print('sync video loader iterating...')
         return self.sync_iterator.__iter__()
