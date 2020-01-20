@@ -45,7 +45,8 @@ class View():
         # eliminate time stamps that will be dropped due to the DALI
         # layer deliviring only complete sequences
         full_length = len(self.ts)
-        self.ts = self.ts[:-drop_tail]
+        if drop_tail > 0:
+            self.ts = self.ts[:-drop_tail]
         print('video %s has %7d frames, trimmed to %7d' % (
             self.video_file_name, full_length, len(self.ts)))
         self.dali_iterator = pytorch.DALIGenericIterator(
@@ -227,9 +228,11 @@ class SynchronizedVideoLoader():
         valid_ts = sorted([t for t in cnt if cnt[t] == len(views)])
         return valid_ts
 
+    def number_of_cameras(self):
+        return len(self.views)
+        
     def __len__(self):
         return int(self.epoch_size)
 
     def __iter__(self):
-        print('sync video loader iterating...')
         return self.sync_iterator.__iter__()
