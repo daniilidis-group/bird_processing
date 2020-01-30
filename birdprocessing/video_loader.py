@@ -1,5 +1,4 @@
 import os
-import sys
 import re
 
 from nvidia.dali.pipeline import Pipeline
@@ -7,7 +6,6 @@ from nvidia.dali.plugin import pytorch
 from collections import defaultdict
 from colorama import Fore, Style
 
-import numpy as np
 import torch
 import nvidia.dali.ops as ops
 import nvidia.dali.types as types
@@ -73,7 +71,8 @@ class View():
             # because e.g. the raw data did not start on a key frame
             num_elim = len(self.ts) - self.number_of_frames
             if num_elim != 0:
-                print(Fore.RED, fname, ' WARN: elim ', num_elim, Style.RESET_ALL)
+                print(Fore.RED, v_fname, ' WARN: elim ',
+                      num_elim, Style.RESET_ALL)
             self.ts = self.ts[num_elim:]
 
     def good_frames(self, valid_ts):
@@ -95,7 +94,7 @@ class BufferedIterator(object):
         self.video_id = video_id
         self.dali_iterator = dali_iterator
         self.data = None
-        self.idx  = 0
+        self.idx = 0
         self.seq_len = seq_len
 
     def __next__(self):
@@ -113,7 +112,8 @@ class BufferedIterator(object):
                 
         if self.data is None:
             raise StopIteration
-        d = torch.squeeze(torch.narrow(self.data[0]['data'], 1, self.idx, 1), dim=0)
+        d = torch.squeeze(torch.narrow(self.data[0]['data'],
+                                       1, self.idx, 1), dim=0)
         self.idx += 1
         return {'data': d}
 
@@ -128,17 +128,19 @@ class BufferedIterator(object):
     def __iter__(self):
         return self
 
+
 class SingleVideoIterator(object):
     def __init__(self, video_id, dali_iterator, seq_len, common_frames):
         self.video_id = video_id
-        self.buffered_iterator = BufferedIterator(video_id, dali_iterator, seq_len)
+        self.buffered_iterator = BufferedIterator(video_id,
+                                                  dali_iterator, seq_len)
         # common_frames holds the local iterators frame numbers
         # that are valid across all cameras.
         self.common_frames = common_frames
         # frame_cnt is the local frame count, referring to the
         # frame numbers as counted via the dali iterator
         self.frame_cnt = -1
-        # 
+
     def __next__(self):
         if len(self.common_frames) == 0:
             raise StopIteration
@@ -149,7 +151,6 @@ class SingleVideoIterator(object):
             self.frame_cnt += 1
         # remove first frame
         self.common_frames.pop(0)
-#        print('single video iter ', self.video_id, ' delivers frame: ', self.frame_cnt - 1)
         return data
 
     def next(self):
